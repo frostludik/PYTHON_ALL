@@ -19,11 +19,11 @@ import json
 import sys
 
 sms_message = "Some packages are missing TRACKNO"
-sms_admin_message = "Failed to connect to database"
+admin_sms_message = "trackno SMS - failed connecting to database"
 recipients = ["+420000000000", "+420000000000"]  #list of recipients
 admin_recipient = ["+420000000000"]
-api_url = "https://api.services.company.com/proxy/sms/manual/paths/invoke"
-headers = {"Ocp-Apim-Subscription-Key": "[API product subscription key]"}
+api_url = "https://api.services.company.com/sms/manual/paths/invoke"
+headers = {"Ocp-Apim-Subscription-Key": "API product subscription key"}
 
 
 send_sms = False
@@ -35,6 +35,7 @@ query = """
     WHERE stato40 IN ('70','80','85')
     AND O40T92.trackno IS NULL
     AND O40T2.upddate < (sysdate - interval '2' minute)
+    AND ocarrtyp NOT IN ('DPTOP','DPMPE')
     """
     
 
@@ -155,16 +156,26 @@ def execute_admin_sms():
     
     payload = {
         "to": admin_recipient,
-        "message": sms_admin_message,
+        "message": admin_sms_message,
         "correlationId": correlation_id,
         "component": component,
         "eventType": event_type
     }
     response = requests.post(api_url, json=payload, headers=headers)
-    if response.status_code != 202:
-        print_with_timestamp("Failed to send admin SMS")
+
+    if response.status_code == 202:
+        response_data = response.json()
+        service_message_id = response_data.get("serviceMessageId", "N/A")
+        workflow_run_id = response_data.get("workflowRunId", "N/A")
+        print_with_timestamp(f"SMS queued for {admin_recipient}. Message ID: {service_message_id}, Workflow ID: {workflow_run_id}")
+    elif response.status_code == 500:
+        response_data = response.json()
+        service_description = response_data.get("serviceDescription", "N/A")
+        service_status = response_data.get("serviceStatus", "N/A")
+        workflow_run_id = response_data.get("workflowRunId", "N/A")
+        print_with_timestamp(f"Error sending SMS to {admin_recipient}. Description: {service_description}, Status: {service_status}, Workflow ID: {workflow_run_id}")
     else:
-        print_with_timestamp("Admin SMS sent")
+        print_with_timestamp(f"Failed to send SMS to {admin_recipient}. Status code: {response.status_code} - {response.text}")
         
 
 def run_loop():
@@ -189,11 +200,11 @@ def run_loop():
                     current_time = time.time()
                     if current_time - last_triggered_time > 900:
                         execute_sms()
-                        print(f"time since last sms: {current_time - last_triggered_time} Must be more than 900 sec")
+                        print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} , waiting 120s for next check...")
                         last_triggered_time = current_time
                     else:
                         print_with_timestamp("!!!SMS NOT SENT. Too short time for re-sending!!!")
-                        print(f"time since last sms: {current_time - last_triggered_time} Must be more than 900 sec")
+                        print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} Must be more than 900 sec")
             time.sleep(120)
         except KeyboardInterrupt:
             break
