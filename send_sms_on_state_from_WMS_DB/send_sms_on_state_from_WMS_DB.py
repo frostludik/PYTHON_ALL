@@ -11,6 +11,13 @@ discord: Luděk M.#5570
     # re-sends SMS not earlier than 15 mins after previous one
     # possible to break the loop with Ctrl+C
 
+# you can create exe file with pyinstaller to run it on Windows without Python installed in console 
+#       -> pyinstaller --onefile --console --hidden copy_astro_sms.py
+# or run it in console with Python installed
+#       -> install python 3.8 or higher
+#       -> install required packages: pip install oracledb, pip install requests
+#       -> run the script: python copy_astro_sms.py
+
 import oracledb
 import requests
 import time
@@ -21,7 +28,7 @@ import sys
 sms_message = "Some packages are missing TRACKNO"
 admin_sms_message = "trackno SMS - failed connecting to database"
 recipients = ["+420000000000", "+420000000000"]  #list of recipients
-admin_recipient = ["+420000000000"]
+admin_recipient = "+420000000000"
 api_url = "https://api.services.company.com/sms/manual/paths/invoke"
 headers = {"Ocp-Apim-Subscription-Key": "API product subscription key"}
 
@@ -69,7 +76,7 @@ def db_connect(retry_interval=30, max_attempts=5):
                 print_with_timestamp(f"Retrying in {retry_interval} seconds...")
                 time.sleep(retry_interval)
             else:
-                execute_admin_sms()
+                execute_sms(admin_recipient, is_admin=True)
                 print_with_timestamp("\n\n!!!Try different network with access to company resources!!!")
                 input("Press enter to exit...")
                 sys.exit()
@@ -107,21 +114,30 @@ def run_check_loop():
     oracle_connect.close()
     print_with_timestamp("Database closed")
     print_with_timestamp(f"Send SMS: {send_sms}")
+    print_with_timestamp("Waiting 120s for next check...")
 
 
    
-def execute_sms():
+def execute_sms(recipients, is_admin=False):
     '''
-    sends SMS to recipients
+    sends SMS
+    if is_admin is True, sends admin SMS    
+    if is_admin is False, sends SMS to recipients
     '''
     correlation_id = ""
-    component = "DC-WMS"
-    event_type = "Missing trackingNumber"
+    component = "WMS-system"
+    if is_admin:
+        event_type = "Failed connect to database"
+        message = "trackno SMS - failed connecting to database"
+        recipients = [admin_recipient] 
+    else:
+        event_type = "Missing trackingNr"
+        message = "Some packages are missing trackingNr"
 
     for recipient in recipients:
         payload = {
             "to": recipient,
-            "message": sms_message,
+            "message": message,
             "correlationId": correlation_id,
             "component": component,
             "eventType": event_type
@@ -144,40 +160,7 @@ def execute_sms():
             print_with_timestamp(f"Failed to send SMS to {recipient}. Status code: {response.status_code} - {response.text}")
 
 
-def execute_admin_sms():
-    '''
-    sends SMS to admin recipient only
-    send in case of failed connection to database
-    simplified response handling
-    '''
-    correlation_id = ""
-    component = "DC-WMS error"
-    event_type = "Failed connect to database"
-    
-    payload = {
-        "to": admin_recipient,
-        "message": admin_sms_message,
-        "correlationId": correlation_id,
-        "component": component,
-        "eventType": event_type
-    }
-    response = requests.post(api_url, json=payload, headers=headers)
-
-    if response.status_code == 202:
-        response_data = response.json()
-        service_message_id = response_data.get("serviceMessageId", "N/A")
-        workflow_run_id = response_data.get("workflowRunId", "N/A")
-        print_with_timestamp(f"SMS queued for {admin_recipient}. Message ID: {service_message_id}, Workflow ID: {workflow_run_id}")
-    elif response.status_code == 500:
-        response_data = response.json()
-        service_description = response_data.get("serviceDescription", "N/A")
-        service_status = response_data.get("serviceStatus", "N/A")
-        workflow_run_id = response_data.get("workflowRunId", "N/A")
-        print_with_timestamp(f"Error sending SMS to {admin_recipient}. Description: {service_description}, Status: {service_status}, Workflow ID: {workflow_run_id}")
-    else:
-        print_with_timestamp(f"Failed to send SMS to {admin_recipient}. Status code: {response.status_code} - {response.text}")
         
-
 def run_loop():
     '''
     -runs the loop with main program
@@ -187,7 +170,7 @@ def run_loop():
         -re-sends SMS not earlier than 15 mins after previous one
     -possible to break the loop with Ctrl+C
     '''
-    start_time = datetime.time(8, 0, 0)
+    start_time = datetime.time(6, 0, 0)
     end_time = datetime.time(22, 0, 0)
     now = datetime.datetime.now().time()
     last_triggered_time = 0
@@ -199,7 +182,7 @@ def run_loop():
                 if send_sms == True:
                     current_time = time.time()
                     if current_time - last_triggered_time > 900:
-                        execute_sms()
+                        execute_sms(recipients)
                         print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} , waiting 120s for next check...")
                         last_triggered_time = current_time
                     else:
