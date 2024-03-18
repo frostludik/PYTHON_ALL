@@ -170,13 +170,13 @@ def run_loop():
         -re-sends SMS not earlier than 15 mins after previous one
     -possible to break the loop with Ctrl+C
     '''
-    start_time = datetime.time(6, 0, 0)
-    end_time = datetime.time(22, 0, 0)
-    now = datetime.datetime.now().time()
     last_triggered_time = 0
     
     while True:
         try:
+            start_time = datetime.time(6, 0, 0)
+            end_time = datetime.time(22, 0, 0)
+            now = datetime.datetime.now().time()
             if start_time <= now <= end_time:
                 run_check_loop()
                 if send_sms == True:
@@ -187,7 +187,9 @@ def run_loop():
                         last_triggered_time = current_time
                     else:
                         print_with_timestamp("!!!SMS NOT SENT. Too short time for re-sending!!!")
-                        print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} Must be more than 900 sec")
+                        print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} Must be more than 900 sec\n")
+            else:
+                print_with_timestamp(f"DB check paused until {start_time}\n")
             time.sleep(120)
         except KeyboardInterrupt:
             break
