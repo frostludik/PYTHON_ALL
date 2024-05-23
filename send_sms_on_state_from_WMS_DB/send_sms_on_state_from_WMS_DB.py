@@ -4,12 +4,13 @@ email: ludek.mraz@centrum.cz
 discord: Luděk M.#5570
 """
 
-# This code runs SQL query against WMS Oracle database
+# This code runs SQL query against WMS's Oracle database
 # If query is evaluated as True, it sends SMS
-    # check status via SQL every 2 mins, if True, sends SMS.
+    # check status via SQL every 2 mins, if True, sends SMS
     # check when last SMS been sent
     # re-sends SMS not earlier than 15 mins after previous one
     # possible to break the loop with Ctrl+C
+    # check runs only within specific time frame (6:00 - 22:00)
 
 # you can create exe file with pyinstaller to run it on Windows without Python installed in console 
 #       -> pyinstaller --onefile --console --hidden copy_astro_sms.py
@@ -18,31 +19,36 @@ discord: Luděk M.#5570
 #       -> install required packages: pip install oracledb, pip install requests
 #       -> run the script: python copy_astro_sms.py
 
+#### 2024-02-28 changed: merged send_sms and admin_send_sms into one function execute_sms
+#### 2024-05-23 changed: database credentials moved to config file
+
+
 import oracledb
 import requests
 import time
 import datetime
 import json
 import sys
+import configparser
 
 sms_message = "Some packages are missing TRACKNO"
 admin_sms_message = "trackno SMS - failed connecting to database"
-recipients = ["+420000000000", "+420000000000"]  #list of recipients
-admin_recipient = "+420000000000"
-api_url = "https://api.services.company.com/sms/manual/paths/invoke"
-headers = {"Ocp-Apim-Subscription-Key": "API product subscription key"}
+recipients = ["+420123456789"] 
+admin_recipient = "+420123456789"
+api_url = "https://api.services.company.com/iam/proxy/sms/manual/paths/invoke"
+headers = {"Ocp-Apim-Subscription-Key": "YOUR_API_KEY"}
 
 
 send_sms = False
 
 query = """
-    Select O40T2.upddate, O40T2.ecarrno, O40T92.trackno
+    Select O40T2.upddate, O40T2.ecarrno, O40T92.trackno 
     FROM O40T2
     LEFT JOIN O40T92 ON O40T2.ecarrno = O40T92.ecarrno
     WHERE stato40 IN ('70','80','85')
     AND O40T92.trackno IS NULL
     AND O40T2.upddate < (sysdate - interval '2' minute)
-    AND ocarrtyp NOT IN ('DPTOP','DPMPE')
+    AND ocarrtyp NOT IN ('DPTOP','DPMPE','EUR')
     """
     
 
@@ -61,11 +67,16 @@ def db_connect(retry_interval=30, max_attempts=5):
     If fails, retries connection in 30 sec intervals for 5 times
     if still fails, sends admin SMS and exits the program
     '''
+    config = configparser.ConfigParser()
+    config.read(r"C:\send_sms_config\config.ini")
+    user = config["oracle_database"]["user"]
+    password = config["oracle_database"]["password"]
+    hostname = config["oracle_database"]["hostname"]
     attempt_count = 0
     while attempt_count < max_attempts:
         try:
             global oracle_connect
-            oracle_connect = oracledb.connect('USER/password@hostname:dc-wms01.dc.company.int/database05')
+            oracle_connect = oracledb.connect(user + "/" + password + "@" + hostname)
             print_with_timestamp("Successfully connected to Oracle Database")
             return
             
@@ -94,6 +105,7 @@ def run_sql(query):
     return bool(row)
 
 
+
 def update_send_sms():
     '''
     updates send_sms variable based on run_sql function result
@@ -101,6 +113,7 @@ def update_send_sms():
     global send_sms
     send_sms = run_sql(query)
     
+  
        
 def run_check_loop():
     '''
@@ -114,7 +127,7 @@ def run_check_loop():
     oracle_connect.close()
     print_with_timestamp("Database closed")
     print_with_timestamp(f"Send SMS: {send_sms}")
-    print_with_timestamp("Waiting 120s for next check...")
+    print_with_timestamp("Waiting 120s for next check...\n")
 
 
    
@@ -125,14 +138,14 @@ def execute_sms(recipients, is_admin=False):
     if is_admin is False, sends SMS to recipients
     '''
     correlation_id = ""
-    component = "WMS-system"
+    component = "AstroELDC"
     if is_admin:
         event_type = "Failed connect to database"
         message = "trackno SMS - failed connecting to database"
         recipients = [admin_recipient] 
     else:
-        event_type = "Missing trackingNr"
-        message = "Some packages are missing trackingNr"
+        event_type = "Missing TRACKNO"
+        message = "Some packages are missing TRACKNO"
 
     for recipient in recipients:
         payload = {
@@ -160,7 +173,7 @@ def execute_sms(recipients, is_admin=False):
             print_with_timestamp(f"Failed to send SMS to {recipient}. Status code: {response.status_code} - {response.text}")
 
 
-        
+
 def run_loop():
     '''
     -runs the loop with main program
@@ -174,25 +187,26 @@ def run_loop():
     
     while True:
         try:
-            start_time = datetime.time(6, 0, 0)
+            start_time = datetime.time(5, 59, 0)
             end_time = datetime.time(22, 0, 0)
             now = datetime.datetime.now().time()
             if start_time <= now <= end_time:
                 run_check_loop()
-                if send_sms == True:
+                if send_sms:
                     current_time = time.time()
-                    if current_time - last_triggered_time > 900:
+                    if current_time - last_triggered_time > 900:  #send SMS not earlier than 15 mins after previous one
                         execute_sms(recipients)
-                        print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} , waiting 120s for next check...")
+                        print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} , waiting 120s for next check...\n")
                         last_triggered_time = current_time
                     else:
                         print_with_timestamp("!!!SMS NOT SENT. Too short time for re-sending!!!")
                         print_with_timestamp(f"time since last sms: {current_time - last_triggered_time} Must be more than 900 sec\n")
             else:
                 print_with_timestamp(f"DB check paused until {start_time}\n")
-            time.sleep(120)
+            time.sleep(120)  #check status via SQL every 2 mins
         except KeyboardInterrupt:
             break
+        
         
 if __name__ == "__main__":       
     run_loop()
