@@ -138,7 +138,7 @@ def execute_sms(recipients, is_admin=False):
     if is_admin is False, sends SMS to recipients
     '''
     correlation_id = ""
-    component = "AstroELDC"
+    component = "WMS"
     if is_admin:
         event_type = "Failed connect to database"
         message = "trackno SMS - failed connecting to database"
